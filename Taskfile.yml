@@ -2,11 +2,87 @@
 
 version: '3'
 
-vars:
-  GREETING: Hello, World!
-
 tasks:
   default:
     cmds:
-      - echo "{{.GREETING}}"
+      - task --list
+  start-database:
+    desc: |
+      Starts a local instance of the database for code generation and testing purposes. The database is initialized with
+      environment variables or variables passed in from other tasks in order to have the override capability. The
+      relative precedence of variables is as listed above, with first entries having higher priority:
+
+      - Variables
+      - Environment variables
+      - Default values
+
+      This means that if calling task initializes the variables for this task, then these are used. If the task variables
+      are not set then the environment variables are used. If environment variable is not set then default values are
+      used.
+
+      For example if you call `DATABASE_USERNAME=someuser task start-database` then the variable `DATABASE_USERNAME`
+      will be filled in with the value stored in environment variable, while the variable `DATABASE_PASSWORD` will
+      be filled in with default value.
+    vars:
+      DATABASE_USERNAME:
+        sh: |
+          VAR_VAL={{ default "" .DATABASE_USERNAME | quote}} ENV_VAR="DATABASE_USERNAME" DEFAULT_VAL="nousr" task varOrEnvOrDefault
+      DATABASE_PASSWORD:
+        sh: |
+          VAR_VAL={{ default "" .DATABASE_PASSWORD | quote}} ENV_VAR="DATABASE_PASSWORD" DEFAULT_VAL="nopwd" task varOrEnvOrDefault
+      DATABASE_LOCAL_PORT:
+        sh: |
+          VAR_VAL={{ default "" .DATABASE_PORT | quote}} ENV_VAR="DATABASE_PORT" DEFAULT_VAL="5432" task varOrEnvOrDefault
+    cmds:
+      - |
+        docker run -e POSTGRES_USER={{ .DATABASE_USERNAME }} -e POSTGRES_PASSWORD={{ .DATABASE_PASSWORD }}  -p {{ .DATABASE_LOCAL_PORT }}:5432  -d postgres:14
+        # Waits for Docker container to become ready before proceeding
+        while ! nc -z localhost 9999;do sleep 1; done;
+
+
+  varOrEnvOrDefault:
+    desc: |
+      This is a small task to encapsulate the functionality of determining the value of a variable in hierarchical
+      fashion either from passed in variable or from environment variable or from default value.
+
+      This task expects three environment variables to be set:
+
+      - VAR_VAL
+      - ENV_VAR
+      - DEFAULT_VAL
+
+      The environment variable VAR_VAL should contain the actual value of the variable which we want to set. For example
+      if our task takes the variable "password" the the VAR_VAL should be set to the value which is currently stored
+      in the variable "password"
+
+      The environment variable ENV_VAR should contain the name of the environment variable which contains the value
+      which we want to use, if VAR_VAL is empty.
+
+      Lastly the environment variable DEFAULT_VAL contains the value which we want to return if both VAR_VAL and ENV_VAR
+      are empty.
+
+      This task will return VAR_VAL if it is not empty. If VAR_VAL is empty then the content of the environment variable
+      whose name is in `ENV_VAR` will be returned. If even that is empty then the value stored in `DEFAULT_VAL` will
+      be returned.
+
+      Three examples and their return values are:
+      - SOME="ENV" VAR_VAL="VAR" ENV_VAR="SOME" DEFAULT_VAL="DEFAULT" task varOrEnvOrDefault returns VAR
+      - SOME="ENV" VAR_VAL="" ENV_VAR="SOME" DEFAULT_VAL="DEFAULT" task varOrEnvOrDefault returns ENV
+      - VAR_VAL="" ENV_VAR="SOME" DEFAULT_VAL="DEFAULT" task varOrEnvOrDefault returns DEFAULT
+    env:
+      VAR_VAL: ""
+      ENV_VAR: ""
+      DEFAULT_VAL: ""
+    cmds:
+      - |
+        if [[ -z "${VAR_VAL}" ]]; then
+                if [[ -z "${!ENV_VAR}" ]]; then
+                        val=${DEFAULT_VAL}
+                else
+                        val=${!ENV_VAR}
+                fi
+        else
+                val="${VAR_VAL}"
+        fi
+        echo $val
     silent: true
